@@ -2,27 +2,111 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>MapLibre Demo</title>
+  <title>Danh sách tài xế đang rảnh gần bạn</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link href="https://unpkg.com/maplibre-gl@3.2.1/dist/maplibre-gl.css" rel="stylesheet" />
   <style>
-    body, html { margin: 0; padding: 0; height: 100%; }
-    #map { width: 100%; height: 100vh; }
+    body { font-family: sans-serif; padding: 20px; }
+    .driver { margin-bottom: 15px; padding: 10px; border: 1px solid #ccc; border-radius: 6px; }
+    .status { font-weight: bold; margin-left: 10px; color: green; }
+    button { padding: 6px 12px; font-size: 14px; margin-top: 6px; }
+    .help { background: #fffbe6; border: 1px solid #ffd700; padding: 15px; border-radius: 8px; margin-top: 20px; }
   </style>
 </head>
 <body>
-  <div id="map"></div>
+  <h2>📋 Tài xế đang rảnh gần bạn nhất</h2>
+  <div id="list">⏳ Đang xác định vị trí...</div>
 
-  <script src="https://unpkg.com/maplibre-gl@3.2.1/dist/maplibre-gl.js"></script>
   <script>
-    const map = new maplibregl.Map({
-      container: 'map',
-      style: 'https://demotiles.maplibre.org/style.json',
-      center: [106.700981, 10.776889], // TP.HCM
-      zoom: 12
-    });
+    const drivers = [
+      { name: 'Tài xế A', vehicle: 'Xe máy', location: [106.7009, 10.7769], status: 'available' },
+      { name: 'Tài xế B', vehicle: 'Ô tô 4 chỗ', location: [106.6829, 10.7629], status: 'busy' },
+      { name: 'Tài xế C', vehicle: 'Ô tô 7 chỗ', location: [106.7100, 10.7800], status: 'moving' },
+      { name: 'Tài xế D', vehicle: 'Trên 7 chỗ', location: [106.6955, 10.7705], status: 'available' }
+    ];
 
-    map.addControl(new maplibregl.NavigationControl(), 'top-right');
+    const vehicleSpeeds = {
+      'Xe máy': 45,
+      'Ô tô 4 chỗ': 60,
+      'Ô tô 7 chỗ': 55,
+      'Trên 7 chỗ': 50
+    };
+
+    navigator.geolocation.getCurrentPosition(
+      function(position) {
+        const userLocation = [position.coords.longitude, position.coords.latitude];
+        const availableDrivers = drivers.filter(d => d.status === 'available');
+
+        const promises = availableDrivers.map(driver => {
+          const url = `https://router.project-osrm.org/route/v1/driving/${driver.location.join(',')};${userLocation.join(',')}?overview=false`;
+          return fetch(url)
+            .then(res => res.json())
+            .then(data => {
+              const distanceKm = data.routes[0].distance / 1000;
+              const speed = vehicleSpeeds[driver.vehicle] || 50;
+              const durationMin = Math.round((distanceKm / speed) * 60);
+              const hours = Math.floor(durationMin / 60);
+              const minutes = durationMin % 60;
+              const timeLabel = hours > 0 ? `${hours} giờ ${minutes} phút` : `${minutes} phút`;
+              return { ...driver, distanceKm, timeLabel };
+            });
+        });
+
+        Promise.all(promises).then(results => {
+          const sorted = results.sort((a, b) => a.distanceKm - b.distanceKm);
+          const container = document.getElementById('list');
+          container.innerHTML = '';
+
+          sorted.forEach(driver => {
+            const div = document.createElement('div');
+            div.className = 'driver';
+            div.innerHTML = `
+              ${driver.name} xe "${driver.vehicle}" – 📍 ${driver.distanceKm.toFixed(2)} km – ⏱️ ${driver.timeLabel}
+              <span class="status">(Đang rảnh)</span><br>
+              <button onclick="openMap(${driver.location[1]}, ${driver.location[0]}, ${userLocation[1]}, ${userLocation[0]})">🔍 Kiểm tra</button>
+            `;
+            container.appendChild(div);
+          });
+
+          if (sorted.length === 0) {
+            container.innerHTML = '❌ Không có tài xế đang rảnh gần bạn.';
+          }
+        });
+      },
+      function(error) {
+        if (error.code === error.PERMISSION_DENIED) {
+          showLocationHelp();
+        } else {
+          document.getElementById('list').innerHTML = '❌ Không lấy được vị trí. Vui lòng thử lại.';
+        }
+      },
+      { enableHighAccuracy: true }
+    );
+
+    function openMap(driverLat, driverLng, userLat, userLng) {
+      const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+      const url = isIOS
+        ? `http://maps.apple.com/?saddr=${driverLat},${driverLng}&daddr=${userLat},${userLng}`
+        : `https://www.google.com/maps/dir/?api=1&origin=${driverLat},${driverLng}&destination=${userLat},${userLng}`;
+      window.open(url, '_blank');
+    }
+
+    function showLocationHelp() {
+      const help = document.createElement('div');
+      help.className = 'help';
+      help.innerHTML = `
+        <h3>⚠️ Bạn đã từ chối quyền định vị</h3>
+        <p>Để sử dụng đầy đủ chức năng, vui lòng mở lại quyền định vị:</p>
+        <ul>
+          <li><b>Trên iPhone/iPad (Safari):</b> Nhấn vào biểu tượng <b>aA</b> ở góc trái thanh địa chỉ → <b>Cài đặt trang web</b> → <b>Vị trí</b> → chọn <b>Cho phép</b></li>
+          <li><b>Trên Android (Chrome):</b> Nhấn vào biểu tượng <b>🔒 ổ khóa</b> bên cạnh URL → <b>Quyền</b> → <b>Vị trí</b> → chọn <b>Cho phép</b></li>
+          <li><b>Trên máy tính:</b> Nhấn vào biểu tượng <b>🔒 ổ khóa</b> bên cạnh URL → chọn <b>Vị trí</b> → chuyển sang <b>Cho phép</b> rồi tải lại trang</li>
+        </ul>
+        <p><b>📌 Sau khi cấp lại quyền, hãy tải lại trang để tiếp tục.</b></p>
+        <button onclick="location.reload()">🔄 Tải lại trang</button>
+      `;
+      document.getElementById('list').innerHTML = '';
+      document.body.appendChild(help);
+    }
   </script>
 </body>
 </html>
