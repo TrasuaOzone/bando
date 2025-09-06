@@ -1,9 +1,6 @@
 import os
 import logging
 import requests
-import base64
-import time
-
 from typing import List, Dict, Optional
 from telegram import Update
 from telegram.ext import (
@@ -15,30 +12,11 @@ from telegram.ext import (
 )
 
 # =========================
-# ĐỌC TOKEN & KEY TỪ FILE / ENV
+# ĐỌC BIẾN MÔI TRƯỜNG
 # =========================
-def read_secret(env_key: str, file_name: str) -> Optional[str]:
-    val = os.getenv(env_key, "").strip()
-    if val:
-        return val
-    if os.path.exists(file_name):
-        with open(file_name, "r", encoding="utf-8") as f:
-            return f.readline().strip()
-    return None
-
-def read_text(file_name: str) -> Optional[str]:
-    if os.path.exists(file_name):
-        with open(file_name, "r", encoding="utf-8") as f:
-            return f.readline().strip()
-    return None
-
-TOKEN          = read_secret("BOT_TOKEN", "TOKEN.txt")
-GROQ_API_KEY   = read_secret("GROQ_API_KEY", "GROQ_API_KEY.txt")
-GROUP_ID       = read_text("GROUP_ID.txt")
-GITHUB_REPO    = read_text("GITHUB_REPO.txt")        # ví dụ "owner/repo"
-GITHUB_BRANCH  = read_text("GITHUB_BRANCH.txt") or "main"
-GITHUB_TOKEN   = read_text("GITHUB_TOKEN.txt")
-DRIVE_FOLDER_ID= read_text("DRIVE_FOLDER_ID.txt")
+TOKEN        = os.getenv("BOT_TOKEN", "").strip()
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+GROUP_ID     = os.getenv("GROUP_ID", "").strip()
 
 # =========================
 # LOGGING
@@ -55,17 +33,15 @@ def mask(s: str, keep: int = 6) -> str:
 logger.info("Bot khởi động. Token: %s", mask(TOKEN))
 logger.info("Groq key: %s", mask(GROQ_API_KEY))
 logger.info("Group ID: %s", GROUP_ID or "Không giới hạn")
-logger.info("GitHub Repo: %s | Branch: %s", GITHUB_REPO, GITHUB_BRANCH)
-logger.info("Drive Folder ID: %s", DRIVE_FOLDER_ID)
 
 # =========================
 # GROQ CONFIG
 # =========================
-GROQ_MODELS_URL  = "https://api.groq.com/openai/v1/models"
-GROQ_CHAT_URL    = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_MODELS_URL = "https://api.groq.com/openai/v1/models"
+GROQ_CHAT_URL   = "https://api.groq.com/openai/v1/chat/completions"
 CURRENT_MODEL: Optional[str] = None
 
-PRIORITY_KEYWORDS = ["llama-4", "llama-3", "mistral", "gemma", "openchat", "instruct", "chat"]
+PRIORITY_KEYWORDS = ["llama-4", "llama-3", "mistral", "gemma", "openchat", "chat"]
 BLACKLIST         = ["embed", "embedding", "vision", "whisper", "tts", "audio", "moderation"]
 MAX_REPLY_CHARS   = 3500
 
@@ -129,7 +105,6 @@ def call_groq_chat(messages: List[Dict[str, str]], retry: bool = True) -> str:
         except Exception as e:
             return f"⚠️ Lỗi phân tích phản hồi AI: {e}"
 
-    # Xử lý lỗi chi tiết theo status code
     err_text = ""
     try:
         err_json = resp.json()
@@ -137,7 +112,6 @@ def call_groq_chat(messages: List[Dict[str, str]], retry: bool = True) -> str:
     except Exception:
         err_text = resp.text
 
-    # Nếu model decommissioned, refresh rồi thử lại 1 lần
     model_issue_signals = [
         "decommissioned", "no longer supported", "does not exist",
         "not found", "unknown model"
@@ -168,25 +142,6 @@ def build_messages(user_text: str) -> List[Dict[str, str]]:
     ]
 
 # =========================
-# HÀM PUSH CODE LÊN GITHUB
-# =========================
-def push_to_github(path: str, repo: str, branch: str, token: str) -> (bool, str):
-    with open(path, "rb") as f:
-        content = base64.b64encode(f.read()).decode()
-    url = f"https://api.github.com/repos/{repo}/contents/{path}"
-    data = {
-        "message": f"Add generated file {path}",
-        "content": content,
-        "branch": branch
-    }
-    headers = {"Authorization": f"token {token}"}
-    resp = requests.put(url, json=data, headers=headers)
-    if resp.status_code in (200, 201):
-        file_url = resp.json()["content"]["html_url"]
-        return True, file_url
-    return False, f"{resp.status_code}: {resp.text}"
-
-# =========================
 # HANDLERS
 # =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -204,12 +159,11 @@ async def cmd_refresh_model(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"🔄 Đã làm mới mô hình: {model or 'Không tìm thấy'}")
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    text = (update.message.text or "").strip()
-    logger.info("Chat ID: %s | Text: %s", chat_id, text)
-
-    if GROUP_ID and str(chat_id) != GROUP_ID:
+    chat_id = str(update.effective_chat.id)
+    if GROUP_ID and chat_id != GROUP_ID:
         return
+
+    text = (update.message.text or "").strip()
     if not text:
         return
 
@@ -219,31 +173,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ai_reply = ai_reply[:MAX_REPLY_CHARS] + "\n\n…(đã rút gọn)"
     await update.message.reply_text(ai_reply or "⚠️ Không nhận được phản hồi từ AI.")
 
-# Command /gen: tạo code, lưu file, push lên GitHub
-async def cmd_gen(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    prompt = update.message.text.replace("/gen", "").strip()
-    if not prompt:
-        await update.message.reply_text("❗ Vui lòng thêm mô tả sau /gen")
-        return
-
-    # 1) Sinh code
-    messages = build_messages(f"Write Python script for: {prompt}")
-    code = call_groq_chat(messages)
-
-    # 2) Lưu file tạm
-    timestamp = int(time.time())
-    fname = f"generated_{timestamp}.py"
-    with open(fname, "w", encoding="utf-8") as f:
-        f.write(code)
-
-    # 3) Push lên GitHub
-    ok, result = push_to_github(fname, GITHUB_REPO, GITHUB_BRANCH, GITHUB_TOKEN)
-    if ok:
-        reply = f"✅ Đã push lên GitHub: {result}"
-    else:
-        reply = f"❌ Push thất bại: {result}"
-    await update.message.reply_text(reply)
-
 # =========================
 # MAIN
 # =========================
@@ -251,11 +180,9 @@ def main():
     ensure_model(force_refresh=True)
     app = ApplicationBuilder().token(TOKEN).build()
 
-    # Đăng ký handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("model", cmd_model))
     app.add_handler(CommandHandler("refreshmodel", cmd_refresh_model))
-    app.add_handler(CommandHandler("gen", cmd_gen))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
     app.run_polling()
