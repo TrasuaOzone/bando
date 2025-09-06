@@ -3,5 +3,3 @@ requests>=2.31.0
 google-api-python-client>=2.126.0
 google-auth>=2.30.0
 google-auth-httplib2>=0.2.0
-pip install --upgrade pip
-pip install -r requirements.txt
