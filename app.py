@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 import mysql.connector
 import bcrypt
 import smtplib
@@ -11,6 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
+CORS(app)  # Cho phép gọi API từ bất kỳ domain nào
 
 # ===== Đọc biến môi trường =====
 DB_HOST = os.getenv("DB_HOST")
