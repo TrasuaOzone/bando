@@ -12,7 +12,7 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# ===== Đọc thông tin từ biến môi trường =====
+# ===== Đọc biến môi trường =====
 DB_HOST = os.getenv("DB_HOST")
 DB_NAME = os.getenv("DB_NAME")
 DB_USER = os.getenv("DB_USER")
@@ -24,11 +24,16 @@ SMTP_USER = os.getenv("SMTP_USER")
 SMTP_PASS = os.getenv("SMTP_PASS")
 SENDER_EMAIL = os.getenv("SENDER_EMAIL")
 
+# ===== Kết nối database =====
 def get_db_connection():
     return mysql.connector.connect(
-        host=DB_HOST, user=DB_USER, password=DB_PASS, database=DB_NAME
+        host=DB_HOST,
+        user=DB_USER,
+        password=DB_PASS,
+        database=DB_NAME
     )
 
+# ===== Gửi email =====
 def send_email(to_email, subject, body):
     msg = MIMEText(body, "plain", "utf-8")
     msg["Subject"] = subject
@@ -40,6 +45,7 @@ def send_email(to_email, subject, body):
         server.login(SMTP_USER, SMTP_PASS)
         server.send_message(msg)
 
+# ===== API: Đăng ký =====
 @app.route("/register", methods=["POST"])
 def register():
     data = request.get_json()
@@ -67,6 +73,7 @@ def register():
         cursor.close()
         conn.close()
 
+# ===== API: Đăng nhập =====
 @app.route("/login", methods=["POST"])
 def login():
     data = request.get_json()
@@ -87,6 +94,7 @@ def login():
     else:
         return jsonify({"ok": False, "error": "Sai SĐT hoặc mật khẩu"}), 401
 
+# ===== API: Quên mật khẩu =====
 @app.route("/forgot-password", methods=["POST"])
 def forgot_password():
     data = request.get_json()
@@ -106,5 +114,7 @@ def forgot_password():
     send_email(email, "Mật khẩu mới", f"Mật khẩu mới của bạn là: {new_pw}")
     return jsonify({"ok": True, "message": "Mật khẩu mới đã được gửi qua email"})
 
+# ===== Chạy app trên Render =====
 if __name__ == "__main__":
-    app.run(debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=True)
