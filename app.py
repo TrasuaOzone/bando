@@ -45,6 +45,11 @@ def send_email(to_email, subject, body):
         server.login(SMTP_USER, SMTP_PASS)
         server.send_message(msg)
 
+# ===== Route kiểm tra trạng thái app =====
+@app.route("/", methods=["GET"])
+def home():
+    return "API Flask đang hoạt động 🚀"
+
 # ===== API: Đăng ký =====
 @app.route("/register", methods=["POST"])
 def register():
